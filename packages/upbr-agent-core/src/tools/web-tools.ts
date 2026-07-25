@@ -131,7 +131,8 @@ export const webSearchTool: ToolConfig = {
 
       while ((match = snippetRegex.exec(html)) !== null) {
         if (snippets.length >= maxResults) break;
-        const snippet = match[1]!.replace(/<[^>]+>/g, "").trim();
+        const rawSnippet = match[1] || "";
+        const snippet = rawSnippet.replace(/<[^>]+>/g, "").trim();
         if (snippet) snippets.push(snippet);
       }
 

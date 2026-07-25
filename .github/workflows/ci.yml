@@ -15,7 +15,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - run: bun install --frozen-lockfile
+      - run: bun install
       - run: bun run typecheck
 
   build:
@@ -26,7 +26,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - run: bun install --frozen-lockfile
+      - run: bun install
       - run: bun run build
 
   test:
@@ -37,5 +37,5 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - run: bun install --frozen-lockfile
+      - run: bun install
       - run: bun test

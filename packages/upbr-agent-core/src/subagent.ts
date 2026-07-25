@@ -1,10 +1,9 @@
-import type { IProvider } from "@upbr233/ai";
+import type { IProvider, Message } from "@upbr233/ai";
 import type {
   SubagentConfig,
   SubagentResult,
   ToolCallRequest,
   ToolCallResult,
-  Message,
 } from "./types";
 import type { ToolRegistry } from "./tool-system";
 
@@ -168,7 +167,7 @@ When you have finished, provide a clear summary of what you did and your finding
 
       messages.push({
         role: "assistant",
-        content: response.content as any,
+        content: response.content,
       });
 
       if (!hasToolCalls) {

@@ -120,7 +120,7 @@ export class SessionStore {
 
   updateSession(id: string, updates: Partial<StoredSession>): void {
     const setClauses: string[] = [];
-    const values: unknown[] = [];
+    const values: (string | number)[] = [];
 
     if (updates.name !== undefined) { setClauses.push("name = ?"); values.push(updates.name); }
     if (updates.mode !== undefined) { setClauses.push("mode = ?"); values.push(updates.mode); }
@@ -131,7 +131,7 @@ export class SessionStore {
     values.push(Date.now());
     values.push(id);
 
-    this.db.prepare(`UPDATE sessions SET ${setClauses.join(", ")} WHERE id = ?`).run(...values);
+    this.db.prepare(`UPDATE sessions SET ${setClauses.join(", ")} WHERE id = ?`).run(...values as any);
   }
 
   deleteSession(id: string): void {

@@ -29,7 +29,16 @@ export const asyncTaskTool: ToolConfig = {
     const toolInput = (input.input as Record<string, unknown>) || {};
     const taskId = `async_${Date.now()}`;
 
-    const task = {
+    const task: {
+      id: string;
+      toolName: string;
+      input: Record<string, unknown>;
+      status: "running" | "completed" | "failed";
+      result?: string;
+      error?: string;
+      startTime: number;
+      endTime?: number;
+    } = {
       id: taskId,
       toolName,
       input: toolInput,

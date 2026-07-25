@@ -67,7 +67,6 @@ export const subConnectTool: ToolConfig = {
       action: {
         type: "string",
         description: "Action: 'send' to send a message, 'receive' to check for messages (default: 'send' if message is provided, otherwise 'receive')",
-        enum: ["send", "receive"],
       },
     },
     required: ["subagentId"],

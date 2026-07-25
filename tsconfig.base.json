@@ -15,6 +15,14 @@
     "sourceMap": true,
     "outDir": "./dist",
     "rootDir": "./src",
+    "baseUrl": ".",
+    "paths": {
+      "@upbr233/ai": ["packages/upbr-ai/src"],
+      "@upbr233/agent-core": ["packages/upbr-agent-core/src"],
+      "@upbr233/tui": ["packages/upbr-tui/src"],
+      "@upbr233/cli": ["packages/upbr-cli/src"],
+      "@upbr233/mmp": ["packages/upbr-mmp/src"]
+    },
     "noUncheckedIndexedAccess": true,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true
