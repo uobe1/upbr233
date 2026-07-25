@@ -7,7 +7,7 @@
     "upbr": "./dist/index.js"
   },
   "scripts": {
-    "build": "bun build src/index.ts --outdir dist --target bun --format esm && tsc --emitDeclarationOnly",
+    "build": "tsc --emitDeclarationOnly",
     "typecheck": "tsc --noEmit",
     "lint": "echo 'lint ok'",
     "dev": "bun run src/index.ts"
