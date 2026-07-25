@@ -21,6 +21,7 @@ import type { ContextManager } from "./context-manager";
 import { SubagentManager } from "./subagent";
 import type { IMMPManager } from "./types";
 import type { SessionStore } from "./session-store";
+import type { IpcHub } from "./ipc/ipc-hub";
 
 export type ToolApprovalCallback = (
   request: ToolCallRequest
@@ -109,7 +110,7 @@ export class AgentLoop {
   }
 
   /** Pass IPC hub to subagent manager for cross-process communication. */
-  setSubagentIpcHub(hub: import("./ipc/ipc-hub").IpcHub): void {
+  setSubagentIpcHub(hub: IpcHub): void {
     this.subagents.setIpcHub(hub);
   }
 

@@ -379,8 +379,7 @@ async function main() {
 
   // Start IPC hub for subagent/async task communication (NNG-style)
   const ipcHub = new IpcHub();
-  try { await ipcHub.start(); setSubConnectIpcHub(ipcHub); } catch { /* IPC unavailable, tools fall back to inproc */ }
-  agentLoop.setSubagentIpcHub(ipcHub);
+  try { await ipcHub.start(); setSubConnectIpcHub(ipcHub); agentLoop.setSubagentIpcHub(ipcHub); } catch { /* IPC unavailable, tools fall back to inproc */ }
 
   // Set up hooks
   const hooks: AgentLoopHooks = {
