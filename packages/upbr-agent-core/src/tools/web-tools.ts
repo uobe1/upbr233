@@ -123,10 +123,10 @@ export const webSearchTool: ToolConfig = {
       const links: string[] = [];
       const snippets: string[] = [];
 
-      let match;
+      let match: RegExpExecArray | null;
       while ((match = linkRegex.exec(html)) !== null) {
         if (links.length >= maxResults) break;
-        links.push(`${match[2].trim()} - ${match[1]}`);
+        links.push(`${(match[2] || "").trim()} - ${match[1] || ""}`);
       }
 
       while ((match = snippetRegex.exec(html)) !== null) {
@@ -138,7 +138,7 @@ export const webSearchTool: ToolConfig = {
 
       const results: string[] = [];
       for (let i = 0; i < Math.min(links.length, snippets.length); i++) {
-        results.push(`${i + 1}. ${links[i]}\n   ${snippets[i]}`);
+        results.push(`${i + 1}. ${links[i] || ""}\n   ${snippets[i] || ""}`);
       }
 
       return {
@@ -162,5 +162,5 @@ export const webSearchTool: ToolConfig = {
 
 function extractTitle(html: string): string {
   const match = /<title[^>]*>([^<]+)<\/title>/i.exec(html);
-  return match ? match[1]!.trim() : "Untitled";
+  return match?.[1]?.trim() ?? "Untitled";
 }
