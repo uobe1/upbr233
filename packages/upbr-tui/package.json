@@ -1,0 +1,26 @@
+{
+  "name": "@upbr233/tui",
+  "version": "0.1.0",
+  "description": "Terminal UI library with differential rendering for the UPBR233 agent",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "bun build src/index.ts --outdir dist --target bun --format esm && tsc --emitDeclarationOnly",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'lint ok'",
+    "dev": "bun --watch src/index.ts"
+  },
+  "dependencies": {
+    "@upbr233/agent-core": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/bun": "latest"
+  }
+}

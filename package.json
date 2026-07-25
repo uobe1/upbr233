@@ -1,0 +1,26 @@
+{
+  "name": "upbr233",
+  "version": "0.1.0",
+  "private": true,
+  "description": "UPBR233 Coding Agent - AI-powered terminal coding assistant",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "bun run build:all",
+    "build:all": "bun run --cwd packages/upbr-ai build && bun run --cwd packages/upbr-agent-core build && bun run --cwd packages/upbr-tui build && bun run --cwd packages/upbr-cli build && bun run --cwd packages/upbr-mmp build",
+    "dev": "bun run --cwd packages/upbr-cli dev",
+    "check": "bun run typecheck && bun run lint",
+    "typecheck": "bun run --cwd packages/upbr-ai typecheck && bun run --cwd packages/upbr-agent-core typecheck && bun run --cwd packages/upbr-tui typecheck && bun run --cwd packages/upbr-cli typecheck && bun run --cwd packages/upbr-mmp typecheck",
+    "lint": "bun run --cwd packages/upbr-ai lint && bun run --cwd packages/upbr-agent-core lint && bun run --cwd packages/upbr-tui lint && bun run --cwd packages/upbr-cli lint && bun run --cwd packages/upbr-mmp lint",
+    "test": "bun test",
+    "clean": "rm -rf packages/*/dist packages/*/node_modules node_modules"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "bun": ">=1.1.0"
+  }
+}

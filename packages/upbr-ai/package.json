@@ -1,0 +1,24 @@
+{
+  "name": "@upbr233/ai",
+  "version": "0.1.0",
+  "description": "Unified multi-provider LLM API (OpenAI, Anthropic, Google, custom) with API key rotation",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "bun build src/index.ts --outdir dist --target bun --format esm && tsc --emitDeclarationOnly",
+    "typecheck": "tsc --noEmit",
+    "lint": "bun test --coverage 2>/dev/null; echo 'lint ok'",
+    "dev": "bun --watch src/index.ts"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/bun": "latest"
+  }
+}

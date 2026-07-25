@@ -1,0 +1,334 @@
+# Agent Development Task
+## 参考
+- OpenCode: https://github.com/anomalyco/opencode
+- Pi Coding Agent: https://github.com/badlogic/pi-mono
+- Kimi Code: https://github.com/MoonshotAI/kimi-code
+- Memory Lancedb Pro: https://github.com/CortexReach/memory-lancedb-pro
+- Lossless Claw Enhanced: https://github.com/win4r/lossless-claw-enhanced
+
+## Output Product
+- upbr233 agent
+- 使用命令 `upbr` 运行
+
+## 术语概览
+* 仅涵盖部分, 并且某些在术语表中的术语还需要自行联网搜索查找信息
+- Agent: AI助理, 主代理, 直接与用户交流, 能执行Tool Call(见下文)
+- Subagent: AI助理, 子代理, 由Agent通过Subagent Tool(alias task)调用, 同样能够执行Tool Call, 与Agent上下文隔离, 执行单个任务, 避免Agent被无用杂音污染上下文, 通过Agent间接与用户交流
+  - 执行各类任务, 通常用于信息收集, 项目探索与代码编写
+  - 通过通信机制与Agent通信
+- Tool: 内置工具, Agent通过特定方式调用, 执行后返回结果给Agent, 调用过程称之为Tool Call, Tool Call完成后一般有Tool Call Result. Agent可以在一次输出中调用多个Tools
+- Skill: 一类工作流, 全称Agent Skill, 详见 agentskills.io
+  - 在上下文中仅加载索引(简介)与魔法词(激活词)
+  - Agent根据自己的判断使用Tool加载SKILL.md的完整内容
+- MCP: Model Context Protocol, Server对外开放的Tool, 工具实现在Cloud而非本地
+
+## 技术栈
+- 考虑使用以下语言开发:
+  - NullCompilerLanguageWithoutName(Safe + Light + Strict + Routine) From 0.07To0.7stars
+    - Reson: 个人项目, 无生态, 未经过严肃验证
+  - Rust(Safe + Fastest + Strict) From3.2To4.2stars
+  - Go(Routine + Fast) From3.3To4.5stars
+  或其他语言
+    * 性能最低要求: >= Js/Ts(Bun)
+    * 可以有runtime, 但必须确保使用此语言的收益 > runtime带来对性能降低减益 (比如Go有GC, 但是并发有优势)
+
+### 性能
+* 不带插件
+- 内存占用 < 80MiB
+- 包体大小 < 400MiB
+- 冷启动时间 < 800ms
+- 关闭时间 < 600ms
+
+### 国际化
+- 多语言
+  - 中文
+  - English
+
+## Agent Loop
+```flow-made-human
+用户输入 -> 构造MSG -> Agent输出 -|
+             \             |
+              \          ______
+               \        /      \
+               有工具调用?     无工具调用 -> 结束
+               (将工具调用结
+               果与之前的上下
+               文打包为MSG)
+```
+  - 很明显可以看出: Tool System是Loop的依赖项
+
+## Prompt
+* 参考OpenCode提示词
+* System Prompt是Agnet Loop的依赖项
+
+## Add Providers
+* 默认不内置 Provider
+* Agent Loop的依赖项, 需要实现把多种平台的协议统一为一个统一层便于开发
+  - 参考Pi Coding Agent
+
+### Models.dev
+* 参考 Kimi Code
+- 选择通过 Models.dev 获取的提供商
+
+### 自定义
+* 支持交互式 / 非交互式配置
+
+- 格式
+  - 用户手动选择: OpenAI兼容, Anthropic兼容
+
+- Name
+  - 用户手动填写
+
+- Base URL
+  - 用户手动填写
+
+- Metadata:
+  - 用户手动填写
+  - 单次请求超时时间
+  - 重试间隔
+  - 重试是否递增时长
+  - ...
+
+- API Key
+  - 用户手动填写
+  - 支持导入API Key列表进行轮换使用
+    - 轮换: 当一个Key不可用时切换到下一个Key, 不可用的Key在5h后自动视为可用, 若5h内所有Key都不可用则阻塞执行并报错直到5h之后
+  - 支持通过环境变量使用
+    - 环境变量为String, 使用列表时需要定义环境变量: 原变量名_LISTS, 其格式为用 ` : ` (空格+:+空格)分隔的多个Api Key
+    - 如果同时定义了LISTS和原风格, 那么会自动合并为LISTS
+  - 使用LISTS方式时会自动去重, 当去重完成后只剩一个API Jey则退化为单个API Key的形式
+
+- Model
+  - Models.dev 提供
+    - 通常来说此时应该可以直接选择通过 Models.dev 获得的提供商
+  - 通过 /v1/models 或者 /models 获取
+    - 获取补全则需要手动填写补全
+  - 用户手动填写模型参数(* 为必填)
+    - 名称(通过它调用模型) *
+    - 最大上下文长度 *
+    - 最大输出
+    - 最大输入
+      - 是否包含思考时
+        - true: 思考时最大长度
+    - 可思考 *
+      - 可开关思考: true, false(始终思考) *
+    - 思考程度分档 *
+      * e.g.: thinking no_thinking. low, high, max.
+    - 定价
+      - 输入
+      - 输出
+      - 缓存命中输入
+    - 能力
+      - 图像输入
+        - 图像输入端口: 不填使用默认端口
+      - 音频输入
+        - 音频输入端口: 不填使用默认端口
+      - 视频输入
+        - 视频输入端口: 不填使用默认端口
+      - 文本输入 * (且必须为true)
+      - 图像输出
+      - 音频输出
+      - 视频输出
+      - 文本输出 * (且必须为true)
+      - 工具调用 *
+
+## Tool System
+- 部分工具调用需要用户批准, 用户可以选择允许一次, 本次会话始终允许或者拒绝(可以附带拒绝原因)
+  * 参考OpenCode
+
+### File module
+* 参考OpenCode实现
+- read_file
+  - 查看文件内容
+
+- write_file
+  - 覆盖写入文件内容 (Overwrite)
+
+- edit_file
+  - 编辑文件内容
+
+- glob_file
+  - 通过文件名寻找文件
+
+- search_file
+  - 搜寻文件内容
+
+- list_dir
+  - 列出目录内容
+
+- tree_dir
+  - 树状列出目录内容
+
+- make_dir
+  - 创建目录
+
+### Ask user question
+* 参考OpenCode实现
+???
+
+### ToDoLists module / Task module
+* 参考OpenCode实现
+???
+
+### Web module
+*参考OpenCode实现
+???
+
+### Subagent module
+* 用户可查看 Subagent 的工作流程, 参考OpenCode
+* 用户也可以向 Subagent 发送信息(用户干预)
+
+- sub_agent. 参考OpenCode
+  - 调用Subagent执行任务
+
+- sub_connect
+  - 与Agent / Subagent进行异步通信
+  - Agent使用时: 指定Subagent编号, 向其发送信息(信息属于Request中的Tool Call Result)
+  - Subagent使用时: 向Parent Agent发送信息(信息属于Request中的Tool Call Result)
+- 基于NNG(nanomsg-next-generation)实现
+
+- finish_task
+  - 结束任务并汇报工作(汇报属于Request中的Tool Call Result)
+
+### Run Shell Command
+- run_cmd
+  - 支持在配置中指定Shell
+    - 也支持通过参数选择运行什么Shell (非必填)
+    - 也支持是否加载 .bashrc / .profile / .zshrc / config.fish等
+  - 命令字符串包含危险命令如rm -rf /tmp /root时需要用户批准才可执行
+
+### Skill
+* 联网搜索: Agent Skill
+* 官网: agentskills.io
+* 参考OpenCode
+
+- load_skill
+  - 加载Skill
+
+### Async Task
+- 基于NNG(nanomsg-next-generation)实现
+
+* 对于部分工具无法使用:
+  finish_task, sub_connect
+
+* 特异结合:
+  - 与sub_agent共同使用时 finish_task 传递的报告变为异步传递
+
+- async_task
+  * 命令参数是其他Tool Call
+
+- async_view
+  - 查看某个异步任务的运行情况
+
+## 交互
+* 参考已有实现: Pi Coding Agent(除文件恢复外全部Features), Claude Code(文件恢复)
+- Timeline
+  * 对话历史: 用户msg, Agent msg, Tool Call
+    (Pi Coding Agent所没有的)Sub Agent msg, Sub Agnet Tool Call
+  - 撤回: 撤回任意对话历史, 创建branch
+    * 同时撤回这个对话历史之后的文件修改
+    * 撤回之后原msg/tool call msg粘贴到用户的输入框, 用户可进行更改之后再次发送以代替原有msg/tool call
+  - 复制: 复制任意对话历史到剪贴板
+  - 删除: 删除任意对话历史, 创建branch
+  - 撤回但不撤回文件修改: 如撤回
+  - 重试: 重试某个msg/tool call
+  - 继续: 继续任何对话
+    - 可以实现"Agent调用XX工具后用户手误终止, 用户通过/continue"的优雅续接
+      不需要用户typing 'Continue'然后发送那样的污染上下文式的Continue
+
+- 交互体验
+  * 需改造(参考OpenCode / Pi Coding Agent)
+  - Ctrl+C两次清除msg
+  - 回车键换行, Ctrl+J发送msg
+
+  * 已有(参考OpenCode / Pi Coding Agent)
+  - Ctrl+D两次退出
+  - 上下键快速切换历史msg
+  - Others...
+
+## Context Manager Plus (Pre-editing)
+* 参考OpenCode
+
+- System layer(Unchangeable)
+  - 系统提示词
+  - 人设
+  - Others...
+
+- Rule layer(Unchangeable)
+  - Skill索引
+  - MCP / Tool Usages
+  - 全局/项目记忆文件 (AGENTS.md, 参考OpenCode)
+
+- Changeable layer(Changeable)
+  - History
+    - System msg
+    - 用户 msg
+    - Agent msg
+    - Tool call(和Tool call result)
+
+对外开放API, Plugin可以通过API管理Context
+Agent工具本身也自带Context Manager
+  * 参考OpenCode
+
+## Plugin
+* 参考OpenCode和Pi Coding Agent
+???
+
+### Download
+- Git Repo
+  - e.g.(github): upbr plguin --install git@github.com Owner:Repo
+    * 不用加 `.git` 在末尾
+
+- (Future)Plugin market
+  * Future代表此功能处于规划之中, 但不是必须功能, 因为我们无法确认是否能够承担成本
+  - e.g.(Builtin): upbr plugin --install market@builtin Owner:Package
+  - e.g.(Third party):
+    - Add: upbr plugin market --add market@URL --name market_name
+      * `market_name` 不能为 `builtin`
+    - Use: upbr plugin --install market@market_name Owner:Package
+
+## 内置Plugin
+- 通过upbr plugin --install @plugin:upbr:PackageName下载
+
+**注意**:
+  - 内置Plugin ≠ Plugin
+  - 内置Plguin ≠ Core Feature
+
+### Memory Manager Pro (Pre-editing)
+- PackageName: mmp
+
+* 参考 memory-lancedb-pro, lossless-claw-enhanced
+  - memory-lancedb-pro: 提供了向量部分的实现
+  - lossless-claw-enhanced: 提供了DAG部分的实现
+
+???
+
+#### 触发方式
+
+---
+# AI asisstant guide
+* 如果你是真人, 略过它
+
+## Grill User
+- 拷问用户一切!
+- 尤其是带有 `???` 和 `Pre-editing` 的部分!!!!
+
+## Mirror
+- Github Clone: 若项目需要Github Clone, 需要询问用户是否在中国大陆
+  - 是则使用 https://gh-proxy.org/https://原仓库.git 或 https://v6.gh-proxy.org/https://原仓库.git来克隆
+  - 否则无变化
+
+## Subagent
+- Subagent是最完美的功能之一, 它将具体行为封装, 避免了上下文污染
+- 使用Subagent帮你搜集信息, 做简单小事等是好文明
+  * 相应地, 自己亲自搜集所有信息是坏文明, 简单小事自己做是罪大恶极的坏文明
+  * 简单小事: 执行测试, 项目探索, 联网搜索, 进行Review
+- 并发调用Subagent是好文明
+  * 并发能够节省时间!
+
+## 信息收集
+- 如果你认为这个项目实现难度很大, 那么代表着你没有看到此文档中的"参考"并搜集它的信息
+  - 或者说, 没有收集完全, 那99.99999999%是没有探索原项目的实现导致的
+  - 我知道你认为不能Clone项目(毕竟那样你的智力就超过50了), 但为什么你也不探索原项目呢? 那你怎么能够了解参考实现呢? 是靠纯Web Search搜索二手消息得到100万年前已经不适用的垃圾吗?
+- 我知道你认为写项目就不能用任何前人构建的东西, 必须自己造轮子
+  - 但按照你这种说法. 其实写这个项目的难度比可控核聚变还难, 因为你需要重新发展文明一直到进行工业革命, 然后研发光刻机等制造CPU, 手写机器码构建汇编器, 手写汇编构建编译器 ... 一直到开始写项目, 多难啊?

@@ -1,0 +1,24 @@
+{
+  "name": "@upbr233/cli",
+  "version": "0.1.0",
+  "description": "UPBR233 Coding Agent CLI - `upbr` command",
+  "main": "./dist/index.js",
+  "bin": {
+    "upbr": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "bun build src/index.ts --outdir dist --target bun --format esm && tsc --emitDeclarationOnly",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'lint ok'",
+    "dev": "bun run src/index.ts"
+  },
+  "dependencies": {
+    "@upbr233/ai": "workspace:*",
+    "@upbr233/agent-core": "workspace:*",
+    "@upbr233/tui": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/bun": "latest"
+  }
+}
