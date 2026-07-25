@@ -32,6 +32,7 @@ import { join } from "node:path";
 
 // === System Prompt ===
 import { getSystemPrompt } from "./prompt";
+import { handlePluginCommand } from "./plugin-cmd";
 
 // === Configuration ===
 interface CliConfig {
@@ -51,6 +52,16 @@ function parseArgs(): CliConfig {
     locale: process.env.LANG?.startsWith("zh") ? "zh" : "en",
     mode: "build",
   };
+
+  // Route 'plugin' subcommand
+  if (args[0] === "plugin") {
+    handlePluginCommand(args.slice(1)).catch((e: Error) => {
+      console.error("Plugin error:", e.message);
+      process.exit(1);
+    });
+    // Return empty config to prevent agent startup
+    return { ...config, _skipAgent: true } as CliConfig;
+  }
 
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
@@ -184,9 +195,14 @@ class PromptHandler {
   }
 }
 
-// === Main ===
-async function main() {
+// === Main ===  async function main() {
   const cliConfig = parseArgs();
+  
+  // If plugin subcommand was routed, exit early
+  if ((cliConfig as Record<string, unknown>)._skipAgent) {
+    return;
+  }
+
   const tui = new TuiRenderer({
     locale: cliConfig.locale,
   } as TuiConfig);
