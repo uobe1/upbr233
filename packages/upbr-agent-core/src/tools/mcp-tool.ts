@@ -95,6 +95,7 @@ export const mcpConnectTool: ToolConfig = {
         metadata: { name, serverInfo: info, toolCount: tools.length },
       };
     } catch (e) {
+      client.disconnect(); // kill orphaned process
       mcpConnections.delete(name);
       return {
         id: "",
@@ -281,6 +282,7 @@ function extractContent(result: Record<string, unknown>): string {
   // Also check for direct 'text' field
   if (typeof result.text === "string") return result.text;
 
-  // Fallback: JSON representation
-  return JSON.stringify(result, null, 2);
+  // Fallback: JSON representation (truncated for safety)
+  const text = JSON.stringify(result, null, 2);
+  return text.length > 3000 ? text.slice(0, 3000) + "\n...[truncated]" : text;
 }
