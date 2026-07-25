@@ -73,8 +73,8 @@ export const mcpConnectTool: ToolConfig = {
       mcpConnections.delete(name);
     }
 
+    const client = new McpClient({ command, args });
     try {
-      const client = new McpClient({ command, args });
       const info = await client.connect();
       mcpConnections.set(name, client);
 
