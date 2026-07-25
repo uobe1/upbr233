@@ -16,6 +16,10 @@ export { IpcHub } from "./ipc/ipc-hub";
 export { setSubConnectIpcHub, getSubConnectIpcHub } from "./tools/sub-connect-tool";
 export type { IpcEnvelope, IpcPeerId, IpcSocketType } from "./ipc/types";
 
+// MCP (Model Context Protocol)
+export { McpClient } from "./mcp/mcp-client";
+export type { McpTool, McpServerInfo } from "./mcp/mcp-client";
+
 // Built-in tools
 export {
   readFileTool, writeFileTool, editFileTool, globFileTool,
@@ -43,6 +47,7 @@ import { writeTodosTool, readTodosTool } from "./tools/todo-tool";
 import { asyncTaskTool, asyncViewTool } from "./tools/async-tools";
 import { subAgentTool, finishTaskTool } from "./tools/subagent-tools";
 import { subConnectTool } from "./tools/sub-connect-tool";
+import { mcpConnectTool, mcpListToolsTool, mcpCallToolTool } from "./tools/mcp-tool";
 
 /**
  * Create a ToolRegistry pre-loaded with all built-in tools.
@@ -81,6 +86,11 @@ export function createToolRegistry(): ToolRegistry {
   registry.register(subAgentTool);
   registry.register(finishTaskTool);
   registry.register(subConnectTool);
+
+  // MCP
+  registry.register(mcpConnectTool);
+  registry.register(mcpListToolsTool);
+  registry.register(mcpCallToolTool);
 
   return registry;
 }
