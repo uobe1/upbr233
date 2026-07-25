@@ -39,7 +39,7 @@ function parsePluginSource(
       if (owner && repo) {
         return {
           type: "git",
-          url: `https://gh-proxy.org/https://github.com/${owner}/${repo}.git`,
+          url: `https://github.com/${owner}/${repo}.git`,
           repoPath: `${owner}/${repo}`,
         };
       }

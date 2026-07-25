@@ -53,16 +53,6 @@ function parseArgs(): CliConfig {
     mode: "build",
   };
 
-  // Route 'plugin' subcommand
-  if (args[0] === "plugin") {
-    handlePluginCommand(args.slice(1)).catch((e: Error) => {
-      console.error("Plugin error:", e.message);
-      process.exit(1);
-    });
-    // Return empty config to prevent agent startup
-    return { ...config, _skipAgent: true } as CliConfig;
-  }
-
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
       case "--model":
@@ -128,6 +118,11 @@ function getHelpText(locale: string): string {
         "  -l, --locale <zh|en>       语言 (默认: 自动检测)",
         "  -h, --help                  显示此帮助信息",
         "  -v, --version               显示版本信息",
+        "",
+        "子命令:",
+        "  plugin --install <源>        安装插件",
+        "  plugin --list               列出已安装插件",
+        "  plugin --remove <名称>      移除插件",
       ].join("\n")
     : [
         "UPBR233 Coding Agent v0.1.0",
@@ -145,6 +140,11 @@ function getHelpText(locale: string): string {
         "  -l, --locale <zh|en>       Language (default: auto-detect)",
         "  -h, --help                  Show this help",
         "  -v, --version               Show version",
+        "",
+        "Subcommands:",
+        "  plugin --install <source>   Install a plugin",
+        "  plugin --list               List installed plugins",
+        "  plugin --remove <name>      Remove a plugin",
       ].join("\n");
 }
 
@@ -195,13 +195,16 @@ class PromptHandler {
   }
 }
 
-// === Main ===  async function main() {
-  const cliConfig = parseArgs();
-  
-  // If plugin subcommand was routed, exit early
-  if ((cliConfig as Record<string, unknown>)._skipAgent) {
+// === Main ===
+async function main() {
+  // Route 'plugin' subcommand before anything else
+  const rawArgs = Bun.argv.slice(2);
+  if (rawArgs[0] === "plugin") {
+    await handlePluginCommand(rawArgs.slice(1));
     return;
   }
+
+  const cliConfig = parseArgs();
 
   const tui = new TuiRenderer({
     locale: cliConfig.locale,
