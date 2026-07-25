@@ -370,7 +370,7 @@ export class AgentLoop {
             id: `tool_call_${Date.now()}`,
             type: "tool_call" as const,
             content: `${tc.name}(${JSON.stringify(tc.input)})`,
-            metadata: { toolName: tc.name, input: tc.input },
+            metadata: { toolName: tc.name, input: tc.input, toolCallId: request.id },
             timestamp: Date.now(),
             parentId: null as string | null,
           };
@@ -443,13 +443,13 @@ export class AgentLoop {
         this.messages = this.messages.slice(0, msgIdx);
         // Also withdraw entries from context manager
         for (let i = entries.length - 1; i >= entryIdx; i--) {
-          contextManager.withdrawEntry(entries[i]!.id);
+          this.contextManager.withdrawEntry(entries[i]!.id);
         }
       }
     }
 
-    // Use provided content or re-run from truncated state
-    const input = newContent || "";
+    // Use provided content or re-run from truncated state with a hint
+    const input = newContent || "Retry from this point.";
     return this.run(input);
   }
 
