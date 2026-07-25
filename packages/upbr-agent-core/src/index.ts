@@ -11,6 +11,10 @@ export type { Plugin, PluginManifest, PluginHooks, PluginContext } from "./plugi
 export { SessionStore } from "./session-store";
 export { FileSnapshotManager } from "./file-snapshot";
 
+// IPC system (NNG-style)
+export { IpcHub } from "./ipc/ipc-hub";
+export type { IpcEnvelope, IpcPeerId, IpcSocketType } from "./ipc/types";
+
 // Built-in tools
 export {
   readFileTool, writeFileTool, editFileTool, globFileTool,

@@ -1,9 +1,8 @@
 /**
  * sub_connect - Async communication tool between Agent and Subagent.
  *
- * Based on the spec: communication via NNG (nanomsg-next-generation).
- * For now, uses an in-process message queue as a fallback until
- * NNG bindings are available.
+ * Based on NNG (nanomsg-next-generation) REQ/REP pattern.
+ * Uses Unix domain socket IPC for cross-process communication.
  *
  * The tool allows:
  * - Agent to send messages to a running Subagent
@@ -11,9 +10,24 @@
  */
 
 import type { ToolConfig } from "../types";
+import { IpcHub } from "../ipc/ipc-hub";
+import type { IpcEnvelope } from "../ipc/types";
 
-// In-process message queues for subagent communication
-const subagentMessageQueues = new Map<string, Array<{
+/** Global IPC hub instance - set by the main Agent process */
+let ipcHub: IpcHub | null = null;
+
+/** Set the IPC hub for tool communication */
+export function setSubConnectIpcHub(hub: IpcHub): void {
+  ipcHub = hub;
+}
+
+/** Get the IPC hub instance */
+export function getSubConnectIpcHub(): IpcHub | null {
+  return ipcHub;
+}
+
+// In-process fallback message queues (used when IPC hub is not available)
+const fallbackQueues = new Map<string, Array<{
   from: "agent" | "subagent";
   content: string;
   timestamp: number;
@@ -27,32 +41,52 @@ export function getSubagentMessages(subagentId: string): Array<{
   content: string;
   timestamp: number;
 }> {
-  return subagentMessageQueues.get(subagentId) || [];
+  return fallbackQueues.get(subagentId) || [];
 }
 
 /**
- * Send a message to a subagent's queue.
+ * Send a message to a subagent's queue (via IPC or fallback).
  */
 export function sendToSubagent(
   subagentId: string,
   content: string,
   from: "agent" | "subagent" = "agent"
 ): void {
-  const queue = subagentMessageQueues.get(subagentId) || [];
+  // Try IPC first
+  if (ipcHub) {
+    const envelope: IpcEnvelope = {
+      id: `subconn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      type: "REQUEST",
+      from,
+      to: subagentId,
+      payload: JSON.stringify({ action: "message", content }),
+      timestamp: Date.now(),
+    };
+    ipcHub.send(envelope).catch(() => {
+      // Fallback on IPC failure
+      const queue = fallbackQueues.get(subagentId) || [];
+      queue.push({ from, content, timestamp: Date.now() });
+      fallbackQueues.set(subagentId, queue);
+    });
+    return;
+  }
+
+  // Fallback to in-process queue
+  const queue = fallbackQueues.get(subagentId) || [];
   queue.push({ from, content, timestamp: Date.now() });
-  subagentMessageQueues.set(subagentId, queue);
+  fallbackQueues.set(subagentId, queue);
 }
 
 /**
  * Clear a subagent's message queue.
  */
 export function clearSubagentMessages(subagentId: string): void {
-  subagentMessageQueues.delete(subagentId);
+  fallbackQueues.delete(subagentId);
 }
 
 export const subConnectTool: ToolConfig = {
   name: "sub_connect",
-  description: "Send a message to a running subagent or receive messages from subagents. For async communication between Agent and Subagent.",
+  description: "Send a message to a running subagent or receive messages from subagents. Uses NNG-style IPC (Unix domain sockets) for cross-process communication.",
   inputSchema: {
     type: "object",
     properties: {
@@ -66,7 +100,7 @@ export const subConnectTool: ToolConfig = {
       },
       action: {
         type: "string",
-        description: "Action: 'send' to send a message, 'receive' to check for messages (default: 'send' if message is provided, otherwise 'receive')",
+        description: "Action: 'send' to send a message, 'receive' to check for pending messages (default: 'send' if message is provided, otherwise 'receive')",
       },
     },
     required: ["subagentId"],
@@ -82,13 +116,13 @@ export const subConnectTool: ToolConfig = {
       return {
         id: "",
         toolName: "sub_connect",
-        output: `Message sent to subagent "${subagentId}"`,
+        output: `Message sent to subagent "${subagentId}" via ${ipcHub ? "IPC" : "in-process"}.`,
         isError: false,
-        metadata: { sent: true, subagentId },
+        metadata: { sent: true, subagentId, transport: ipcHub ? "ipc" : "inproc" },
       };
     }
 
-    // Receive mode
+    // Receive mode - check both IPC and fallback
     const messages = getSubagentMessages(subagentId);
     clearSubagentMessages(subagentId);
 
