@@ -1,4 +1,4 @@
-import type { Message, ToolDefinition, MessageContent } from "@upbr233/ai";
+import type { Message, ToolDefinition, ToolPropertySchema, MessageContent } from "@upbr233/ai";
 
 // === Agent Session ===
 
@@ -35,11 +35,7 @@ export interface ToolConfig {
   description: string;
   inputSchema: {
     type: "object";
-    properties: Record<string, {
-      type: string;
-      description?: string;
-      items?: Record<string, unknown>;
-    }>;
+    properties: Record<string, ToolPropertySchema>;
     required?: string[];
   };
   requiresApproval: boolean;
