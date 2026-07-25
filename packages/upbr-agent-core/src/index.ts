@@ -13,6 +13,7 @@ export { FileSnapshotManager } from "./file-snapshot";
 
 // IPC system (NNG-style)
 export { IpcHub } from "./ipc/ipc-hub";
+export { setSubConnectIpcHub, getSubConnectIpcHub } from "./tools/sub-connect-tool";
 export type { IpcEnvelope, IpcPeerId, IpcSocketType } from "./ipc/types";
 
 // Built-in tools

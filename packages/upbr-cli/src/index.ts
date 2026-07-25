@@ -13,6 +13,8 @@ import {
   createToolRegistry,
   SessionStore,
   FileSnapshotManager,
+  IpcHub,
+  setSubConnectIpcHub,
 } from "@upbr233/agent-core";
 import type {
   AgentLoopHooks,
@@ -374,6 +376,11 @@ async function main() {
   for (const toolName of savedApprovals) {
     // Mark as approved in registry
   }
+
+  // Start IPC hub for subagent/async task communication
+  const ipcHub = new IpcHub();
+  await ipcHub.start();
+  setSubConnectIpcHub(ipcHub);
 
   // Set up hooks
   const hooks: AgentLoopHooks = {
@@ -743,8 +750,9 @@ async function main() {
   });
 
   // Cleanup on exit
-  process.on("exit", () => {
+  process.on("exit", async () => {
     process.stdout.write("\x1b[?25h"); // show cursor
+    await ipcHub.stop();
   });
 }
 
