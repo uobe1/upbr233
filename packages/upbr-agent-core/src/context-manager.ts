@@ -1,4 +1,5 @@
 import { readFileSync, existsSync } from "fs";
+import { join } from "path";
 import type { MessageContent, ToolUseContent, ToolResultContent } from "@upbr233/ai";
 import {
   type ContextManagerConfig,
@@ -50,6 +51,34 @@ export class ContextManager {
         } catch {
           // File not found or unreadable, skip
         }
+      }
+    }
+  }
+
+  /**
+   * Load AGENTS.md and other project rule files from the project root.
+   * Searches: AGENTS.md, .agents.md, CLAUDE.md, .cursorrules, .windsurfrules
+   */
+  loadProjectRules(projectRoot?: string): void {
+    const root = projectRoot || process.cwd();
+    const ruleFiles = [
+      "AGENTS.md",
+      ".agents.md", 
+      "CLAUDE.md",
+      ".cursorrules",
+      ".windsurfrules",
+      "CONTRIBUTING.md",
+    ];
+
+    for (const filename of ruleFiles) {
+      const path = join(root, filename);
+      try {
+        if (existsSync(path)) {
+          const content = readFileSync(path, "utf-8");
+          this.ruleFiles.set(filename, content);
+        }
+      } catch {
+        // File not found or unreadable, skip
       }
     }
   }

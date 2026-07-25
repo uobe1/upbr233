@@ -313,6 +313,9 @@ async function main() {
   };
   const contextManager = new ContextManager(ctxConfig);
 
+  // Load project rules (AGENTS.md, etc.)
+  contextManager.loadProjectRules();
+
   // Memory Manager Pro (DAG memory)
   const storageDir = join(process.env.HOME || "/tmp", ".upbr");
   if (!existsSync(storageDir)) mkdirSync(storageDir, { recursive: true });
@@ -564,6 +567,207 @@ async function main() {
 
   refreshDisplay();
 
+  // === Slash Command Handler (Timeline Operations) ===
+  function handleSlashCommand(cmd: string): boolean {
+    const parts = cmd.trim().split(/\s+/);
+    const command = parts[0]?.toLowerCase();
+    const arg = parts[1];
+
+    // Build entry map for ID lookup
+    const entries = contextManager.getEntries();
+    const entryMap = new Map(entries.map((e, i) => [(i + 1).toString(), e]));
+
+    switch (command) {
+      case "/history": {
+        if (entries.length === 0) {
+          chatMessages.push({ role: "system", content: "Timeline is empty." });
+          refreshDisplay();
+          return true;
+        }
+        const lines = ["## Timeline", ""];
+        entries.forEach((e, i) => {
+          const id = i + 1;
+          const type = e.type === "user" ? "👤" : e.type === "agent" ? "🤖" : e.type === "tool_call" ? "🔧" : e.type === "tool_result" ? "📋" : "🔀";
+          const preview = e.content.slice(0, 60).replace(/\n/g, " ");
+          lines.push(`  ${id}. ${type} [${e.type}] ${preview}${e.content.length > 60 ? "..." : ""}`);
+        });
+        chatMessages.push({ role: "system", content: lines.join("\n") });
+        refreshDisplay();
+        return true;
+      }
+
+      case "/withdraw":
+      case "/withdraw-text": {
+        if (!arg) {
+          chatMessages.push({ role: "system", content: "Usage: /withdraw <id>  (use /history to see IDs)" });
+          refreshDisplay();
+          return true;
+        }
+        const entry = entryMap.get(arg) || entries.find((e) => e.id === arg);
+        if (!entry) {
+          chatMessages.push({ role: "system", content: `Entry ${arg} not found. Use /history to see available IDs.` });
+          refreshDisplay();
+          return true;
+        }
+
+        const idx = entries.indexOf(entry);
+        // Find tool calls after this entry for file revert
+        const afterEntries = entries.slice(idx);
+        const toolCallIds = afterEntries
+          .filter((e) => e.type === "tool_call")
+          .map((e) => (e.metadata as Record<string, unknown>)?.toolCallId as string)
+          .filter(Boolean);
+
+        // Revert files if in withdraw mode (not withdraw-text)
+        if (command === "/withdraw" && toolCallIds.length > 0) {
+          for (const tcid of toolCallIds.reverse()) {
+            snapshotManager.revertAfter(tcid).catch(() => {});
+          }
+        }
+
+        // Withdraw from context
+        contextManager.withdrawEntry(entry.id);
+
+        // Remove from chat messages (rough approximation)
+        const removedCount = entries.length - entries.slice(0, idx).length;
+        while (removedCount > 0 && chatMessages.length > 0) {
+          const last = chatMessages[chatMessages.length - 1]!;
+          if (last.role !== "system" || !last.content.startsWith("## Timeline")) {
+            chatMessages.pop();
+          } else {
+            break;
+          }
+        }
+
+        chatMessages.push({
+          role: "system",
+          content: command === "/withdraw"
+            ? `Withdrawn entry ${arg} ("${entry.content.slice(0, 40)}...") — files reverted. Branch created.`
+            : `Withdrawn entry ${arg} ("${entry.content.slice(0, 40)}...") — files preserved. Branch created.`,
+        });
+        refreshDisplay();
+        return true;
+      }
+
+      case "/delete": {
+        if (!arg) {
+          chatMessages.push({ role: "system", content: "Usage: /delete <id>  (use /history to see IDs)" });
+          refreshDisplay();
+          return true;
+        }
+        const entry = entryMap.get(arg) || entries.find((e) => e.id === arg);
+        if (!entry) {
+          chatMessages.push({ role: "system", content: `Entry ${arg} not found.` });
+          refreshDisplay();
+          return true;
+        }
+        contextManager.deleteEntry(entry.id);
+        chatMessages.push({
+          role: "system",
+          content: `Deleted entry ${arg} ("${entry.content.slice(0, 40)}..."). Branch created.`,
+        });
+        refreshDisplay();
+        return true;
+      }
+
+      case "/retry": {
+        if (!arg) {
+          chatMessages.push({ role: "system", content: "Usage: /retry <id>  (use /history to see IDs)" });
+          refreshDisplay();
+          return true;
+        }
+        const entry = entryMap.get(arg) || entries.find((e) => e.id === arg);
+        if (!entry) {
+          chatMessages.push({ role: "system", content: `Entry ${arg} not found.` });
+          refreshDisplay();
+          return true;
+        }
+
+        // Put the entry content back in the input buffer for editing
+        if (entry.type === "user") {
+          inputBuffer = entry.content;
+          cursorPos = inputBuffer.length;
+          chatMessages.push({ role: "system", content: `Retrying entry ${arg}. Edit the message and press Ctrl+J to resend.` });
+        } else {
+          // For non-user entries, retry via AgentLoop
+          agentLoop.retry(entry.id).then(() => {
+            refreshDisplay();
+          }).catch((e: Error) => {
+            chatMessages.push({ role: "system", content: `Retry failed: ${e.message}` });
+            refreshDisplay();
+          });
+        }
+        refreshDisplay();
+        return true;
+      }
+
+      case "/continue": {
+        agentLoop.continue().then((step) => {
+          const agentText = step.messages
+            .filter((m) => m.role === "assistant")
+            .slice(-1)
+            .map((m) => typeof m.content === "string" ? m.content : "")
+            .join("");
+          if (agentText) {
+            chatMessages.push({ role: "assistant", content: agentText });
+          }
+          if (step.error) {
+            chatMessages.push({ role: "system", content: `Error: ${step.error}` });
+          }
+          currentStreaming = "";
+          refreshDisplay();
+        }).catch((e: Error) => {
+          chatMessages.push({ role: "system", content: `Continue failed: ${e.message}` });
+          refreshDisplay();
+        });
+        chatMessages.push({ role: "system", content: "Continuing from where the agent stopped..." });
+        refreshDisplay();
+        return true;
+      }
+
+      case "/copy": {
+        if (!arg) {
+          chatMessages.push({ role: "system", content: "Usage: /copy <id>  (use /history to see IDs)" });
+          refreshDisplay();
+          return true;
+        }
+        const entry = entryMap.get(arg) || entries.find((e) => e.id === arg);
+        if (!entry) {
+          chatMessages.push({ role: "system", content: `Entry ${arg} not found.` });
+          refreshDisplay();
+          return true;
+        }
+        // Display the full content (clipboard integration is terminal-dependent)
+        chatMessages.push({ role: "system", content: `--- Copy of entry ${arg} (${entry.type}) ---\n${entry.content}\n--- End copy ---` });
+        refreshDisplay();
+        return true;
+      }
+
+      case "/help": {
+        chatMessages.push({
+          role: "system",
+          content: [
+            "## Slash Commands",
+            "",
+            "/history          Show conversation timeline with IDs",
+            "/withdraw <id>    Withdraw entry + revert file changes (creates branch)",
+            "/withdraw-text <id>  Withdraw entry, keep file changes",
+            "/delete <id>      Delete entry (creates branch)",
+            "/retry <id>       Retry a user message (puts in input) or tool call",
+            "/continue         Continue from where the agent stopped",
+            "/copy <id>        Show full content of an entry",
+            "/help             Show this help",
+          ].join("\n"),
+        });
+        refreshDisplay();
+        return true;
+      }
+
+      default:
+        return false; // Not a slash command, send to agent
+    }
+  }
+
   // === Keyboard Input Loop ===
   process.stdin.setRawMode(true);
   process.stdin.resume();
@@ -644,6 +848,14 @@ async function main() {
           const message = inputBuffer.trim();
           inputBuffer = "";
           cursorPos = 0;
+
+          // Check if it's a slash command
+          if (message.startsWith("/")) {
+            const handled = handleSlashCommand(message);
+            if (handled) break;
+            // Not a recognized command, send to agent as normal message
+          }
+
           currentStreaming = "";
 
           // Add to history

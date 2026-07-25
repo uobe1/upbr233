@@ -441,14 +441,16 @@ export class AgentLoop {
       if (msgIdx > 0 && msgIdx < this.messages.length) {
         // Truncate messages after this point
         this.messages = this.messages.slice(0, msgIdx);
+        // Also withdraw entries from context manager
+        for (let i = entries.length - 1; i >= entryIdx; i--) {
+          contextManager.withdrawEntry(entries[i]!.id);
+        }
       }
     }
 
-    if (newContent) {
-      this.messages.push({ role: "user", content: newContent });
-    }
-
-    return this.run("");
+    // Use provided content or re-run from truncated state
+    const input = newContent || "";
+    return this.run(input);
   }
 
   /**
