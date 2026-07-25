@@ -108,6 +108,11 @@ export class AgentLoop {
     this.sessionId = sessionId;
   }
 
+  /** Pass IPC hub to subagent manager for cross-process communication. */
+  setSubagentIpcHub(hub: import("./ipc/ipc-hub").IpcHub): void {
+    this.subagents.setIpcHub(hub);
+  }
+
   getState(): AgentState {
     return this.state;
   }

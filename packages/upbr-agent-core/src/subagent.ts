@@ -6,12 +6,15 @@ import type {
   ToolCallResult,
 } from "./types";
 import type { ToolRegistry } from "./tool-system";
+import type { IpcHub } from "./ipc/ipc-hub";
+import type { IpcEnvelope } from "./ipc/types";
 
 /**
  * Subagent Manager - manages isolated subagent instances.
  *
  * Each subagent runs in an isolated context to avoid polluting the main
- * agent's context window. Communication happens via a message-passing system.
+ * agent's context window. Communication happens via IPC (NNG-style)
+ * or in-process message passing as fallback.
  *
  * Inspired by OpenCode's subagent system and Kimi Code's parallel subagents.
  */
@@ -19,13 +22,19 @@ export class SubagentManager {
   private provider: IProvider;
   private tools: ToolRegistry;
   private running = new Map<string, SubagentInstance>();
-  private pendingMessages = new Map<string, string[]>(); // subagentId -> messages
+  private pendingMessages = new Map<string, string[]>();
   private parentModel: string;
+  private ipcHub: IpcHub | null = null;
 
   constructor(provider: IProvider, tools: ToolRegistry, model?: string) {
     this.provider = provider;
     this.tools = tools;
     this.parentModel = model || "unknown";
+  }
+
+  /** Set IPC hub for cross-process subagent communication */
+  setIpcHub(hub: IpcHub): void {
+    this.ipcHub = hub;
   }
 
   /** Update the model used by subagents. */
@@ -51,10 +60,16 @@ export class SubagentManager {
 
     this.running.set(subagentId, instance);
 
+    // Notify via IPC that subagent started
+    this.notifyIpc(subagentId, "spawned", { name: config.name, prompt: config.prompt.slice(0, 200) });
+
     try {
       const result = await this.runSubagent(instance, config);
       instance.status = "completed";
       instance.endTime = Date.now();
+
+      // Notify via IPC that subagent completed
+      this.notifyIpc(subagentId, "completed", { result: result.slice(0, 500), toolCalls: instance.toolCalls });
 
       this.running.delete(subagentId);
       return {
@@ -66,6 +81,9 @@ export class SubagentManager {
     } catch (e) {
       instance.status = "failed";
       instance.endTime = Date.now();
+
+      // Notify via IPC that subagent failed
+      this.notifyIpc(subagentId, "failed", { error: e instanceof Error ? e.message : String(e) });
 
       this.running.delete(subagentId);
       return {
@@ -119,7 +137,19 @@ export class SubagentManager {
     return true;
   }
 
-  private async runSubagent(
+  /** Send IPC notification about subagent state change */
+  private notifyIpc(subagentId: string, event: string, data: Record<string, unknown>): void {
+    if (!this.ipcHub) return;
+    const envelope: IpcEnvelope = {
+      id: `sub_${subagentId}_${Date.now()}`,
+      type: "NOTIFY",
+      from: "agent",
+      to: subagentId,
+      payload: JSON.stringify({ type: `subagent_${event}`, subagentId, ...data }),
+      timestamp: Date.now(),
+    };
+    this.ipcHub.send(envelope).catch(() => { /* non-critical */ });
+  }
     instance: SubagentInstance,
     config: SubagentConfig
   ): Promise<string> {
