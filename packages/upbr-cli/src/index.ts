@@ -337,6 +337,11 @@ async function main() {
     process.exit(0);
   }
 
+  // Chat state - must be declared before --resume block
+  const chatMessages: Array<{ role: string; content: string }> = [];
+  let agentState: AgentState = "idle";
+  let currentStreaming = "";
+
   // Handle --resume: restore entries from previous session
   if (cliConfig.resumeSession) {
     const prevSession = sessionStore.getSession(cliConfig.resumeSession);
@@ -369,11 +374,6 @@ async function main() {
   for (const toolName of savedApprovals) {
     // Mark as approved in registry
   }
-
-  // Chat state - declared before resume logic so it's available there
-  const chatMessages: Array<{ role: string; content: string }> = [];
-  let agentState: AgentState = "idle";
-  let currentStreaming = "";
 
   // Set up hooks
   const hooks: AgentLoopHooks = {
@@ -603,7 +603,7 @@ async function main() {
     handleKey(key);
   });
 
-  function handleKey(key: string) {
+  async function handleKey(key: string) {
     switch (key) {
       // Enter inserts newline, Ctrl+J sends
       case KEY_ENTER:

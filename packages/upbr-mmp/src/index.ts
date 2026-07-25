@@ -429,7 +429,7 @@ export const mmpPlugin = {
   description: "Memory Manager Pro - DAG-based long-term memory",
   version: "0.1.0",
   factory: (options?: Record<string, unknown>) =>
-    new MemoryManagerPro(options as Parameters<typeof MemoryManagerPro>[0] || {}),
+    new MemoryManagerPro((options || {}) as ConstructorParameters<typeof MemoryManagerPro>[0]),
 };
 
 export default MemoryManagerPro;
