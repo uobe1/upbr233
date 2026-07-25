@@ -377,10 +377,9 @@ async function main() {
     // Mark as approved in registry
   }
 
-  // Start IPC hub for subagent/async task communication
+  // Start IPC hub for subagent/async task communication (NNG-style)
   const ipcHub = new IpcHub();
-  await ipcHub.start();
-  setSubConnectIpcHub(ipcHub);
+  try { await ipcHub.start(); setSubConnectIpcHub(ipcHub); } catch { /* IPC unavailable, tools fall back to inproc */ }
 
   // Set up hooks
   const hooks: AgentLoopHooks = {
@@ -749,10 +748,11 @@ async function main() {
     refreshDisplay();
   });
 
-  // Cleanup on exit
-  process.on("exit", async () => {
+  // Cleanup on exit (synchronous - async won't run on exit event)
+  process.on("SIGINT", () => { ipcHub.stop(); process.exit(); });
+  process.on("SIGTERM", () => { ipcHub.stop(); process.exit(); });
+  process.on("exit", () => {
     process.stdout.write("\x1b[?25h"); // show cursor
-    await ipcHub.stop();
   });
 }
 
