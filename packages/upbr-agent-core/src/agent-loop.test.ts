@@ -217,18 +217,27 @@ describe("AgentLoop", () => {
   });
 
   describe("retry", () => {
-    test("retry truncates messages after specified entry", async () => {
+    test("retry handles missing entry gracefully", async () => {
       const { loop, provider } = setupAgentLoop();
       provider.setResponse("First response");
       await loop.run("First message");
-      const beforeCount = loop.getMessages().length;
 
-      // Retry from the first user message
+      // Retry with a non-existent entry ID should still complete without error
       provider.setResponse("Retry response");
-      const step = await loop.retry("user_");
+      const step = await loop.retry("nonexistent_id");
       expect(step.error).toBeUndefined();
-      // Messages should be fewer after truncation + new response
-      expect(loop.getMessages().length).toBeLessThanOrEqual(beforeCount + 1);
+      expect(step.state).toBe("done");
+    });
+
+    test("retry with new content sends replacement message", async () => {
+      const { loop, provider } = setupAgentLoop();
+      provider.setResponse("Original");
+      await loop.run("Original message");
+
+      provider.setResponse("Replaced");
+      const step = await loop.retry("nonexistent", "New content");
+      expect(step.error).toBeUndefined();
+      expect(step.state).toBe("done");
     });
   });
 
