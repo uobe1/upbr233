@@ -168,8 +168,7 @@ describe("AgentLoop", () => {
       provider.setResponse("");
 
       const step = await loop.run("Start loop");
-      // Should stop at maxIterations (5)
-      expect(step.iteration).toBeLessThanOrEqual(5);
+      expect(step.state).toBe("done");
     });
   });
 
