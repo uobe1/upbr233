@@ -150,6 +150,8 @@ export class SubagentManager {
     };
     this.ipcHub.send(envelope).catch(() => { /* non-critical */ });
   }
+
+  private async runSubagent(
     instance: SubagentInstance,
     config: SubagentConfig
   ): Promise<string> {
