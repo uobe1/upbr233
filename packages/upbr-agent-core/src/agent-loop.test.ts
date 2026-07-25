@@ -65,8 +65,8 @@ class MockProvider implements IProvider {
     yield { type: "message_stop" };
   }
 
-  async countTokens(): Promise<number> { return 42; }
-  async healthCheck(): Promise<boolean> { return true; }
+  async countTokens() { return 42; }
+  async healthCheck() { return true; }
 }
 
 function setupAgentLoop(opts?: { model?: string; systemPrompt?: string; tools?: ToolConfig[] }) {
