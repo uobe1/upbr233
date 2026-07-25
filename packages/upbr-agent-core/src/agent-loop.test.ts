@@ -9,8 +9,8 @@ import type {
   StreamEvent,
   MessageContent,
   ModelConfig,
-  ToolConfig,
-} from "./types";
+} from "@upbr233/ai";
+import type { ToolConfig } from "./types";
 
 /** Minimal mock provider for testing AgentLoop */
 class MockProvider implements IProvider {

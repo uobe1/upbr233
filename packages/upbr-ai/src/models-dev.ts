@@ -31,8 +31,8 @@ export class ModelsDevClient {
       );
 
       if (!resp.ok) return [];
-      const data = await resp.json();
-      const models = (data.models || data.data || []).map(this.parseModelEntry);
+      const data = await resp.json() as Record<string, unknown>;
+      const models = ((data.models || data.data || []) as Array<Record<string, unknown>>).map(this.parseModelEntry);
 
       this.cache.set(`search:${query}`, {
         data: models,
@@ -60,8 +60,8 @@ export class ModelsDevClient {
       });
 
       if (!resp.ok) return [];
-      const data = await resp.json();
-      const providers = (data.providers || data.data || []).map(
+      const data = await resp.json() as Record<string, unknown>;
+      const providers = ((data.providers || data.data || []) as Array<Record<string, unknown>>).map(
         (p: Record<string, unknown>) => ({
           name: p.name as string,
           id: p.id as string,
@@ -98,8 +98,8 @@ export class ModelsDevClient {
       );
 
       if (!resp.ok) return [];
-      const data = await resp.json();
-      const models = (data.models || data.data || []).map(this.parseModelEntry);
+      const data = await resp.json() as Record<string, unknown>;
+      const models = ((data.models || data.data || []) as Array<Record<string, unknown>>).map(this.parseModelEntry);
 
       this.cache.set(`provider:${providerId}`, {
         data: models,

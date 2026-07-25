@@ -88,8 +88,8 @@ export class AnthropicProvider implements IProvider {
         signal: AbortSignal.timeout(this.timeoutMs),
       });
       if (resp.ok) {
-        const data = await resp.json();
-        const models = (data.data || data.models || []).map((m: Record<string, unknown>) => ({
+        const data = await resp.json() as Record<string, unknown>;
+        const models = ((data.data || data.models || []) as Array<Record<string, unknown>>).map((m) => ({
           name: (m.id || m.name) as string,
           maxContextLength: (m.context_window || 200000) as number,
           thinking: { canThink: true, canToggle: true, levels: ["no_thinking", "low", "high", "max"] },
@@ -164,7 +164,7 @@ export class AnthropicProvider implements IProvider {
       }
 
       this.retryCount = 0;
-      const data = await resp.json();
+      const data = await resp.json() as Record<string, unknown>;
       return this.parseResponse(data);
     } catch (e) {
       if (e instanceof Error && e.message.startsWith("Provider error")) throw e;

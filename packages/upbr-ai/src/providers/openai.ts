@@ -95,8 +95,8 @@ export class OpenAIProvider implements IProvider {
         }
         return [];
       }
-      const data = await resp.json();
-      return (data.data || []).map((m: { id: string }) => ({
+      const data = await resp.json() as Record<string, unknown>;
+      return ((data.data || []) as Array<{ id: string }>).map((m) => ({
         name: m.id,
         maxContextLength: 128000,
         thinking: { canThink: false, canToggle: false, levels: [] },
@@ -145,7 +145,7 @@ export class OpenAIProvider implements IProvider {
       }
 
       this.retryCount = 0;
-      const data = await resp.json();
+      const data = await resp.json() as Record<string, unknown>;
       return this.parseResponse(data);
     } catch (e) {
       if (e instanceof Error && e.message.startsWith("Provider error")) throw e;
