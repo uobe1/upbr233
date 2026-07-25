@@ -1,6 +1,7 @@
 import type {
   IProvider,
   ProviderConfig,
+  ProviderMetadata,
   LLMRequest,
   LLMResponse,
   StreamEvent,
@@ -16,21 +17,38 @@ export class OpenAIProvider implements IProvider {
   private apiKeys: string[];
   private currentKeyIndex = 0;
   private keyLockedUntil = new Map<number, number>(); // index -> timestamp
+  private metadata: ProviderMetadata;
+  private retryCount = 0;
 
   constructor(config: ProviderConfig) {
     this.name = config.name;
     this.baseUrl = config.baseUrl.replace(/\/+$/, "");
     this.apiKeys = [...new Set(config.apiKeys)]; // dedup
+    this.metadata = config.metadata || {};
     if (this.apiKeys.length === 0) {
       throw new Error(`Provider "${config.name}" has no API keys configured`);
     }
+  }
+
+  private get timeoutMs(): number {
+    return this.metadata.requestTimeoutMs ?? parseInt(process.env.UPBR_REQUEST_TIMEOUT || "120000");
+  }
+
+  private get maxRetries(): number {
+    return this.metadata.maxRetries ?? 3;
+  }
+
+  private get retryDelay(): number {
+    if (this.metadata.retryBackoff) {
+      return (this.metadata.retryIntervalMs || 1000) * Math.pow(2, this.retryCount);
+    }
+    return this.metadata.retryIntervalMs || 1000;
   }
 
   private getActiveKey(): string {
     const now = Date.now();
     const startIdx = this.currentKeyIndex;
 
-    // Try all keys, respecting lockout periods
     for (let i = 0; i < this.apiKeys.length; i++) {
       const idx = (startIdx + i) % this.apiKeys.length;
       const lockedUntil = this.keyLockedUntil.get(idx);
@@ -40,9 +58,8 @@ export class OpenAIProvider implements IProvider {
       }
     }
 
-    // All keys locked - find earliest unlock time
     let earliestUnlock = Infinity;
-    for (const [idx, until] of this.keyLockedUntil) {
+    for (const [, until] of this.keyLockedUntil) {
       if (until < earliestUnlock) earliestUnlock = until;
     }
     const waitMs = earliestUnlock - now;
@@ -53,7 +70,6 @@ export class OpenAIProvider implements IProvider {
   }
 
   private lockKey(index: number): void {
-    // Lock for 5 hours as per spec
     this.keyLockedUntil.set(index, Date.now() + 5 * 60 * 60 * 1000);
   }
 
@@ -62,7 +78,7 @@ export class OpenAIProvider implements IProvider {
     try {
       const resp = await fetch(`${this.baseUrl}/v1/models`, {
         headers: { Authorization: `Bearer ${key}` },
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(this.timeoutMs),
       });
       if (!resp.ok) {
         if (resp.status === 401 || resp.status === 403) {
@@ -79,13 +95,17 @@ export class OpenAIProvider implements IProvider {
         capabilities: { textInput: true, textOutput: true, toolCall: true },
       }));
     } catch {
-      // Network error - try next key
       this.lockKey(this.currentKeyIndex);
       return this.listModels();
     }
   }
 
   async chat(request: LLMRequest): Promise<LLMResponse> {
+    this.retryCount = 0;
+    return this._chat(request);
+  }
+
+  private async _chat(request: LLMRequest): Promise<LLMResponse> {
     const key = this.getActiveKey();
     const body = this.buildRequestBody(request);
 
@@ -97,31 +117,48 @@ export class OpenAIProvider implements IProvider {
           "Content-Type": "application/json",
         },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(
-          parseInt(process.env.UPBR_REQUEST_TIMEOUT || "120000")
-        ),
+        signal: AbortSignal.timeout(this.timeoutMs),
       });
 
       if (!resp.ok) {
         const err = await resp.text().catch(() => "");
         if (resp.status === 401 || resp.status === 403) {
           this.lockKey(this.currentKeyIndex);
-          return this.chat(request);
+          return this._chat(request);
+        }
+        if (resp.status === 429 || resp.status >= 500) {
+          if (this.retryCount < this.maxRetries) {
+            this.retryCount++;
+            await this.sleep(this.retryDelay);
+            return this._chat(request);
+          }
         }
         throw new Error(`Provider error (${resp.status}): ${err}`);
       }
 
+      this.retryCount = 0;
       const data = await resp.json();
       return this.parseResponse(data);
     } catch (e) {
       if (e instanceof Error && e.message.startsWith("Provider error")) throw e;
       if (e instanceof Error && e.message.startsWith("All API keys")) throw e;
+      if (this.retryCount < this.maxRetries) {
+        this.retryCount++;
+        await this.sleep(this.retryDelay);
+        this.lockKey(this.currentKeyIndex);
+        return this._chat(request);
+      }
       this.lockKey(this.currentKeyIndex);
-      return this.chat(request);
+      return this._chat(request);
     }
   }
 
   async *chatStream(request: LLMRequest): AsyncGenerator<StreamEvent> {
+    this.retryCount = 0;
+    yield* this._chatStream(request);
+  }
+
+  private async *_chatStream(request: LLMRequest): AsyncGenerator<StreamEvent> {
     const key = this.getActiveKey();
     const body = { ...this.buildRequestBody(request), stream: true };
 
@@ -132,16 +169,20 @@ export class OpenAIProvider implements IProvider {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(
-        parseInt(process.env.UPBR_REQUEST_TIMEOUT || "120000")
-      ),
+      signal: AbortSignal.timeout(this.timeoutMs),
     });
 
     if (!resp.ok || !resp.body) {
       const err = await resp.text().catch(() => "");
       if (resp.status === 401 || resp.status === 403) {
         this.lockKey(this.currentKeyIndex);
-        yield* this.chatStream(request);
+        yield* this._chatStream(request);
+        return;
+      }
+      if ((resp.status === 429 || resp.status >= 500) && this.retryCount < this.maxRetries) {
+        this.retryCount++;
+        await this.sleep(this.retryDelay);
+        yield* this._chatStream(request);
         return;
       }
       yield { type: "error", error: `Provider error (${resp.status}): ${err}` };
@@ -177,20 +218,15 @@ export class OpenAIProvider implements IProvider {
             const delta = chunk.choices?.[0]?.delta;
             if (!delta) continue;
 
-            // Text delta
             if (delta.content) {
               yield { type: "text_delta", text: delta.content };
             }
 
-            // Tool calls
             if (delta.tool_calls) {
               for (const tc of delta.tool_calls) {
                 const idx = tc.index;
                 if (!toolUseBuffers.has(idx)) {
-                  toolUseBuffers.set(idx, {
-                    name: tc.function?.name || "",
-                    input: "",
-                  });
+                  toolUseBuffers.set(idx, { name: tc.function?.name || "", input: "" });
                 }
                 const buf = toolUseBuffers.get(idx)!;
                 if (tc.function?.name) buf.name = tc.function.name;
@@ -198,28 +234,23 @@ export class OpenAIProvider implements IProvider {
               }
             }
 
-            // Finish reason
             if (chunk.choices?.[0]?.finish_reason === "tool_calls") {
-              for (const [idx, buf] of toolUseBuffers) {
+              for (const [, buf] of toolUseBuffers) {
                 try {
                   const input = JSON.parse(buf.input);
                   yield {
                     type: "tool_use",
                     toolUse: {
                       type: "tool_use",
-                      id: `tool_${idx}_${Date.now()}`,
+                      id: `tool_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`,
                       name: buf.name,
                       input,
                     },
                   };
-                } catch {
-                  // Skip malformed tool calls
-                }
+                } catch { /* skip malformed */ }
               }
             }
-          } catch {
-            // Skip malformed JSON chunks
-          }
+          } catch { /* skip malformed chunks */ }
         }
       }
       yield { type: "message_stop" };
@@ -228,17 +259,13 @@ export class OpenAIProvider implements IProvider {
     }
   }
 
-  async countTokens(messages: Message[], model: string): Promise<number> {
-    // Rough estimate: ~4 chars per token for English, ~2 for CJK
+  async countTokens(messages: Message[], _model: string): Promise<number> {
     let total = 0;
     for (const msg of messages) {
       const content = typeof msg.content === "string"
-        ? msg.content
-        : JSON.stringify(msg.content);
-      // Rough estimate: 4 chars per token
+        ? msg.content : JSON.stringify(msg.content);
       total += Math.ceil(content.length / 4);
     }
-    // Add 3 tokens per message for formatting
     total += messages.length * 3;
     return total;
   }
@@ -263,11 +290,7 @@ export class OpenAIProvider implements IProvider {
     if (request.tools && request.tools.length > 0) {
       body.tools = request.tools.map((t) => ({
         type: "function",
-        function: {
-          name: t.name,
-          description: t.description,
-          parameters: t.input_schema,
-        },
+        function: { name: t.name, description: t.description, parameters: t.input_schema },
       }));
     }
 
@@ -280,18 +303,12 @@ export class OpenAIProvider implements IProvider {
 
   private formatMessages(request: LLMRequest): Array<Record<string, unknown>> {
     const msgs: Array<Record<string, unknown>> = [];
-
     if (request.system) {
       msgs.push({ role: "system", content: request.system });
     }
-
     for (const msg of request.messages) {
-      msgs.push({
-        role: msg.role,
-        content: msg.content,
-      });
+      msgs.push({ role: msg.role, content: msg.content });
     }
-
     return msgs;
   }
 
@@ -301,7 +318,6 @@ export class OpenAIProvider implements IProvider {
     const usage = data.usage as Record<string, number>;
 
     const content: LLMResponse["content"] = [];
-
     if (typeof message?.content === "string" && message.content) {
       content.push({ type: "text", text: message.content });
     }
@@ -314,9 +330,7 @@ export class OpenAIProvider implements IProvider {
           type: "tool_use",
           id: (tc.id as string) || `tool_${Date.now()}`,
           name: (fn?.name as string) || "",
-          input: typeof fn?.arguments === "string"
-            ? JSON.parse(fn.arguments)
-            : (fn?.arguments || {}),
+          input: typeof fn?.arguments === "string" ? JSON.parse(fn.arguments) : (fn?.arguments || {}),
         });
       }
     }
@@ -337,5 +351,9 @@ export class OpenAIProvider implements IProvider {
         outputTokens: usage?.completion_tokens ?? 0,
       },
     };
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }

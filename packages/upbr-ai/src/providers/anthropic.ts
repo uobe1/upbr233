@@ -1,6 +1,7 @@
 import type {
   IProvider,
   ProviderConfig,
+  ProviderMetadata,
   LLMRequest,
   LLMResponse,
   StreamEvent,
@@ -16,14 +17,32 @@ export class AnthropicProvider implements IProvider {
   private apiKeys: string[];
   private currentKeyIndex = 0;
   private keyLockedUntil = new Map<number, number>();
+  private metadata: ProviderMetadata;
+  private retryCount = 0;
 
   constructor(config: ProviderConfig) {
     this.name = config.name;
     this.baseUrl = config.baseUrl.replace(/\/+$/, "");
     this.apiKeys = [...new Set(config.apiKeys)];
+    this.metadata = config.metadata || {};
     if (this.apiKeys.length === 0) {
       throw new Error(`Provider "${config.name}" has no API keys configured`);
     }
+  }
+
+  private get timeoutMs(): number {
+    return this.metadata.requestTimeoutMs ?? parseInt(process.env.UPBR_REQUEST_TIMEOUT || "120000");
+  }
+
+  private get maxRetries(): number {
+    return this.metadata.maxRetries ?? 3;
+  }
+
+  private get retryDelay(): number {
+    if (this.metadata.retryBackoff) {
+      return (this.metadata.retryIntervalMs || 1000) * Math.pow(2, this.retryCount);
+    }
+    return this.metadata.retryIntervalMs || 1000;
   }
 
   private getActiveKey(): string {
@@ -53,57 +72,58 @@ export class AnthropicProvider implements IProvider {
   }
 
   async listModels(): Promise<ModelConfig[]> {
-    // Anthropic doesn't have a standard /models endpoint
-    // Return known Claude models
+    const key = this.getActiveKey();
+    // Try to fetch from /v1/models or /models endpoints first
+    try {
+      const resp = await fetch(`${this.baseUrl}/v1/models`, {
+        headers: { "x-api-key": key, "anthropic-version": "2023-06-01" },
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        const models = (data.data || data.models || []).map((m: Record<string, unknown>) => ({
+          name: (m.id || m.name) as string,
+          maxContextLength: (m.context_window || 200000) as number,
+          thinking: { canThink: true, canToggle: true, levels: ["no_thinking", "low", "high", "max"] },
+          capabilities: { textInput: true, textOutput: true, toolCall: true, imageInput: true },
+        }));
+        if (models.length > 0) return models;
+      }
+      if (resp.status === 401 || resp.status === 403) this.lockKey(this.currentKeyIndex);
+    } catch { /* fall through to defaults */ }
+
+    // Fallback to known Claude models
     return [
       {
         name: "claude-sonnet-4-20250514",
         maxContextLength: 200000,
         maxOutput: 64000,
-        thinking: {
-          canThink: true,
-          canToggle: true,
-          levels: ["no_thinking", "low", "high", "max"],
-        },
-        capabilities: {
-          textInput: true,
-          textOutput: true,
-          toolCall: true,
-          imageInput: true,
-        },
+        thinking: { canThink: true, canToggle: true, levels: ["no_thinking", "low", "high", "max"] },
+        capabilities: { textInput: true, textOutput: true, toolCall: true, imageInput: true },
       },
       {
         name: "claude-opus-4-20250514",
         maxContextLength: 200000,
         maxOutput: 32000,
-        thinking: {
-          canThink: true,
-          canToggle: true,
-          levels: ["no_thinking", "low", "high", "max"],
-        },
-        capabilities: {
-          textInput: true,
-          textOutput: true,
-          toolCall: true,
-          imageInput: true,
-        },
+        thinking: { canThink: true, canToggle: true, levels: ["no_thinking", "low", "high", "max"] },
+        capabilities: { textInput: true, textOutput: true, toolCall: true, imageInput: true },
       },
       {
         name: "claude-haiku-3-5-20241022",
         maxContextLength: 200000,
         maxOutput: 8192,
         thinking: { canThink: false, canToggle: false, levels: [] },
-        capabilities: {
-          textInput: true,
-          textOutput: true,
-          toolCall: true,
-          imageInput: true,
-        },
+        capabilities: { textInput: true, textOutput: true, toolCall: true, imageInput: true },
       },
     ];
   }
 
   async chat(request: LLMRequest): Promise<LLMResponse> {
+    this.retryCount = 0;
+    return this._chat(request);
+  }
+
+  private async _chat(request: LLMRequest): Promise<LLMResponse> {
     const key = this.getActiveKey();
     const body = this.buildRequestBody(request);
 
@@ -116,31 +136,48 @@ export class AnthropicProvider implements IProvider {
           "Content-Type": "application/json",
         },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(
-          parseInt(process.env.UPBR_REQUEST_TIMEOUT || "120000")
-        ),
+        signal: AbortSignal.timeout(this.timeoutMs),
       });
 
       if (!resp.ok) {
         const err = await resp.text().catch(() => "");
         if (resp.status === 401 || resp.status === 403) {
           this.lockKey(this.currentKeyIndex);
-          return this.chat(request);
+          return this._chat(request);
+        }
+        if (resp.status === 429 || resp.status >= 500) {
+          if (this.retryCount < this.maxRetries) {
+            this.retryCount++;
+            await this.sleep(this.retryDelay);
+            return this._chat(request);
+          }
         }
         throw new Error(`Provider error (${resp.status}): ${err}`);
       }
 
+      this.retryCount = 0;
       const data = await resp.json();
       return this.parseResponse(data);
     } catch (e) {
       if (e instanceof Error && e.message.startsWith("Provider error")) throw e;
       if (e instanceof Error && e.message.startsWith("All API keys")) throw e;
+      if (this.retryCount < this.maxRetries) {
+        this.retryCount++;
+        await this.sleep(this.retryDelay);
+        this.lockKey(this.currentKeyIndex);
+        return this._chat(request);
+      }
       this.lockKey(this.currentKeyIndex);
-      return this.chat(request);
+      return this._chat(request);
     }
   }
 
   async *chatStream(request: LLMRequest): AsyncGenerator<StreamEvent> {
+    this.retryCount = 0;
+    yield* this._chatStream(request);
+  }
+
+  private async *_chatStream(request: LLMRequest): AsyncGenerator<StreamEvent> {
     const key = this.getActiveKey();
     const body = { ...this.buildRequestBody(request), stream: true };
 
@@ -153,18 +190,22 @@ export class AnthropicProvider implements IProvider {
           "Content-Type": "application/json",
         },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(
-          parseInt(process.env.UPBR_REQUEST_TIMEOUT || "120000")
-        ),
+        signal: AbortSignal.timeout(this.timeoutMs),
       });
 
       if (!resp.ok || !resp.body) {
+        const err = await resp.text().catch(() => "");
         if (resp.status === 401 || resp.status === 403) {
           this.lockKey(this.currentKeyIndex);
-          yield* this.chatStream(request);
+          yield* this._chatStream(request);
           return;
         }
-        const err = await resp.text().catch(() => "");
+        if ((resp.status === 429 || resp.status >= 500) && this.retryCount < this.maxRetries) {
+          this.retryCount++;
+          await this.sleep(this.retryDelay);
+          yield* this._chatStream(request);
+          return;
+        }
         yield { type: "error", error: `Provider error (${resp.status}): ${err}` };
         return;
       }
@@ -190,16 +231,11 @@ export class AnthropicProvider implements IProvider {
             const jsonStr = trimmed.slice(6);
             try {
               const event = JSON.parse(jsonStr);
-
               switch (event.type) {
                 case "content_block_start": {
                   const block = event.content_block;
                   if (block?.type === "tool_use") {
-                    currentToolBlock = {
-                      id: block.id,
-                      name: block.name,
-                      input: "",
-                    };
+                    currentToolBlock = { id: block.id, name: block.name, input: "" };
                   }
                   break;
                 }
@@ -215,19 +251,16 @@ export class AnthropicProvider implements IProvider {
                 case "content_block_stop": {
                   if (currentToolBlock) {
                     try {
-                      const input = JSON.parse(currentToolBlock.input);
                       yield {
                         type: "tool_use",
                         toolUse: {
                           type: "tool_use",
                           id: currentToolBlock.id,
                           name: currentToolBlock.name,
-                          input,
+                          input: JSON.parse(currentToolBlock.input),
                         },
                       };
-                    } catch {
-                      // skip malformed input
-                    }
+                    } catch { /* skip malformed */ }
                     currentToolBlock = null;
                   }
                   break;
@@ -237,9 +270,7 @@ export class AnthropicProvider implements IProvider {
                   return;
                 }
               }
-            } catch {
-              // Skip malformed events
-            }
+            } catch { /* skip malformed events */ }
           }
         }
         yield { type: "message_stop" };
@@ -248,7 +279,7 @@ export class AnthropicProvider implements IProvider {
       }
     } catch {
       this.lockKey(this.currentKeyIndex);
-      yield* this.chatStream(request);
+      yield* this._chatStream(request);
     }
   }
 
@@ -256,8 +287,7 @@ export class AnthropicProvider implements IProvider {
     let total = 0;
     for (const msg of messages) {
       const content = typeof msg.content === "string"
-        ? msg.content
-        : JSON.stringify(msg.content);
+        ? msg.content : JSON.stringify(msg.content);
       total += Math.ceil(content.length / 4);
     }
     total += messages.length * 3;
@@ -289,9 +319,7 @@ export class AnthropicProvider implements IProvider {
 
     if (systemMessages.length > 0) {
       body.system = systemMessages
-        .map((m) =>
-          typeof m.content === "string" ? m.content : JSON.stringify(m.content)
-        )
+        .map((m) => typeof m.content === "string" ? m.content : JSON.stringify(m.content))
         .join("\n\n");
     }
 
@@ -316,25 +344,18 @@ export class AnthropicProvider implements IProvider {
   } {
     const systemMessages: Message[] = [];
     const otherMessages: Message[] = [];
-
     for (const msg of request.messages) {
-      if (msg.role === "system") {
-        systemMessages.push(msg);
-      } else {
-        otherMessages.push(msg);
-      }
+      if (msg.role === "system") systemMessages.push(msg);
+      else otherMessages.push(msg);
     }
-
     if (request.system) {
       systemMessages.unshift({ role: "system", content: request.system });
     }
-
     return { systemMessages, otherMessages };
   }
 
   private parseResponse(data: Record<string, unknown>): LLMResponse {
     const content: MessageContent[] = [];
-
     const contentBlocks = data.content as Array<Record<string, unknown>>;
     if (contentBlocks) {
       for (const block of contentBlocks) {
@@ -358,13 +379,10 @@ export class AnthropicProvider implements IProvider {
       id: (data.id as string) || crypto.randomUUID(),
       model: (data.model as string) || "unknown",
       content,
-      stopReason: stopReasonStr === "tool_use"
-        ? "tool_use"
-        : stopReasonStr === "end_turn"
-          ? "end_turn"
-          : stopReasonStr === "max_tokens"
-            ? "max_tokens"
-            : "stop_sequence",
+      stopReason: stopReasonStr === "tool_use" ? "tool_use"
+        : stopReasonStr === "end_turn" ? "end_turn"
+        : stopReasonStr === "max_tokens" ? "max_tokens"
+        : "stop_sequence",
       usage: {
         inputTokens: usage?.input_tokens ?? 0,
         outputTokens: usage?.output_tokens ?? 0,
@@ -372,5 +390,9 @@ export class AnthropicProvider implements IProvider {
         cacheReadInputTokens: usage?.cache_read_input_tokens,
       },
     };
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
