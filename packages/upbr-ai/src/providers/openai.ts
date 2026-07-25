@@ -16,6 +16,7 @@ export class OpenAIProvider implements IProvider {
   private baseUrl: string;
   private apiKeys: string[];
   private currentKeyIndex = 0;
+  private lastUsedKeyIndex = -1;
   private keyLockedUntil = new Map<number, number>(); // index -> timestamp
   private metadata: ProviderMetadata;
   private retryCount = 0;
@@ -53,6 +54,7 @@ export class OpenAIProvider implements IProvider {
       const idx = (startIdx + i) % this.apiKeys.length;
       const lockedUntil = this.keyLockedUntil.get(idx);
       if (!lockedUntil || now >= lockedUntil) {
+        this.lastUsedKeyIndex = idx;
         this.currentKeyIndex = (idx + 1) % this.apiKeys.length;
         return this.apiKeys[idx]!;
       }
@@ -73,6 +75,12 @@ export class OpenAIProvider implements IProvider {
     this.keyLockedUntil.set(index, Date.now() + 5 * 60 * 60 * 1000);
   }
 
+  private lockLastUsedKey(): void {
+    if (this.lastUsedKeyIndex >= 0) {
+      this.lockKey(this.lastUsedKeyIndex);
+    }
+  }
+
   async listModels(): Promise<ModelConfig[]> {
     const key = this.getActiveKey();
     try {
@@ -82,7 +90,7 @@ export class OpenAIProvider implements IProvider {
       });
       if (!resp.ok) {
         if (resp.status === 401 || resp.status === 403) {
-          this.lockKey(this.currentKeyIndex);
+          this.lockLastUsedKey();
           return this.listModels();
         }
         return [];
@@ -95,7 +103,7 @@ export class OpenAIProvider implements IProvider {
         capabilities: { textInput: true, textOutput: true, toolCall: true },
       }));
     } catch {
-      this.lockKey(this.currentKeyIndex);
+      this.lockLastUsedKey();
       return this.listModels();
     }
   }
@@ -123,7 +131,7 @@ export class OpenAIProvider implements IProvider {
       if (!resp.ok) {
         const err = await resp.text().catch(() => "");
         if (resp.status === 401 || resp.status === 403) {
-          this.lockKey(this.currentKeyIndex);
+          this.lockLastUsedKey();
           return this._chat(request);
         }
         if (resp.status === 429 || resp.status >= 500) {
@@ -145,10 +153,10 @@ export class OpenAIProvider implements IProvider {
       if (this.retryCount < this.maxRetries) {
         this.retryCount++;
         await this.sleep(this.retryDelay);
-        this.lockKey(this.currentKeyIndex);
+        this.lockLastUsedKey();
         return this._chat(request);
       }
-      this.lockKey(this.currentKeyIndex);
+      this.lockLastUsedKey();
       return this._chat(request);
     }
   }
@@ -175,7 +183,7 @@ export class OpenAIProvider implements IProvider {
     if (!resp.ok || !resp.body) {
       const err = await resp.text().catch(() => "");
       if (resp.status === 401 || resp.status === 403) {
-        this.lockKey(this.currentKeyIndex);
+        this.lockLastUsedKey();
         yield* this._chatStream(request);
         return;
       }
