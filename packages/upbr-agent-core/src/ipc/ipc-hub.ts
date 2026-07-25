@@ -14,7 +14,7 @@
 
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { createServer, type Server, type Socket } from "node:net";
+import { createServer, Socket, type Server } from "node:net";
 import type { IpcEnvelope, IpcMessageHandler, IpcPeerId } from "./types";
 
 const IPC_DIR = join(process.env.HOME || "/tmp", ".upbr", "ipc");
